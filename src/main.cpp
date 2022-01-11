@@ -148,7 +148,7 @@ Ref<Buffer> createBufferedObjects(Environment& env, uint nodecount, std::unorder
         position.x = (bounding - radius) * (distribution(rng) * 2.0f - 1.0f);
         position.y = (bounding - radius) * (distribution(rng) * 2.0f - 1.0f);
         float angle = distribution(rng) * 2.0f * glm::pi<float>();
-        glm::vec2 velocity = glm::vec2(glm::cos(angle), glm::sin(angle)) * distribution(rng) * 20.0f;
+        glm::vec2 velocity = glm::vec2(glm::cos(angle), glm::sin(angle)) * distribution(rng) * 15.0f;
         nodes[i] = {weight, radius, position, velocity};
     }
 

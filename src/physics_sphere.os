@@ -30,7 +30,7 @@ void main() {
     if (u_color_mode == 0) {
         color = vec4(1 - in_node.mass, 0, 1 - in_node.mass, 1);
     } else if (u_color_mode == 1) {
-        color = vec4(1 - in_node.velocity.length() * 0.2, 0, 1 - in_node.velocity.length() * 0.2, 1);
+        color = vec4((in_node.velocity.x * 0.1 + 1)/2, 0, (in_node.velocity.y * 0.1 + 1)/2, 1);
     } else {
         color = vec4(u_color, 1);
     }
