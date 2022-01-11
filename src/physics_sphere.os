@@ -19,21 +19,26 @@ layout(std430, binding = 0) readonly buffer input_nodes {
 
 } in_nodes;
 
-out vec4 color;
+uniform vec3 u_color;
+uniform uint u_color_mode;
 
-uniform mat4 u_model_matrix;
+out vec4 color;
 
 void main() {
     const Node in_node = in_nodes.nodes[gl_InstanceID];
     gl_Position = vec4(in_Pos * in_node.radius, 0, 1) - vec4(in_node.position, 0, 0);
-    color = vec4(1 - in_node.mass, 0, 1 - in_node.mass, 1);
-
+    if (u_color_mode == 0) {
+        color = vec4(1 - in_node.mass, 0, 1 - in_node.mass, 1);
+    } else if (u_color_mode == 1) {
+        color = vec4(1 - in_node.velocity.length() * 0.2, 0, 1 - in_node.velocity.length() * 0.2, 1);
+    } else {
+        color = vec4(u_color, 1);
+    }
 }
 
 @fragment
 #version 450 core
 
-uniform vec3 u_color;
 
 in vec4 color;
 out vec4 FragColor;

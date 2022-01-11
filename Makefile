@@ -44,5 +44,6 @@ $(libDir)liboxide.a: $(objFiles)
 
 clean:
 	rm -f build/* || true
+	rm ./debug ./profiling ./release 2>/dev/null >/dev/null || true
 
 # vim: set noexpandtab:

@@ -21,10 +21,12 @@
 #include <tracy/TracyOpenGL.hpp>
 
 #include <random>
+#include <chrono>
 
 constexpr uint circle_points = 30;
 constexpr float circle_radius = 0.01f;
 float TS = 0.0002;
+const unsigned long long SEED = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
 
 void glfw_error_callback(int error, const char* description) {
     printf("Glfw Error %d: %s\n", error, description);
@@ -85,30 +87,6 @@ glEnable(GL_DEBUG_OUTPUT);
 
 }
 
-namespace tinygltf_impl {
-    using namespace tinygltf;
-    int load_model(TinyGLTF &loader, Model *model, std::string model_name) {
-        std::string err;
-        std::string warn;
-
-        bool ret = loader.LoadASCIIFromFile(model, &err, &warn, model_name);
-
-        if (!warn.empty()) {
-          printf("Warn: %s\n", warn.c_str());
-        }
-
-        if (!err.empty()) {
-          printf("Err: %s\n", err.c_str());
-        }
-
-        if (!ret) {
-          printf("Failed to parse glTF\n");
-          return -1;
-        }
-        return 0;
-    }
-}
-
 struct Environment {
 
     uint64_t lines;
@@ -160,7 +138,7 @@ Ref<Buffer> createBufferedObjects(Environment& env, uint nodecount, std::unorder
     std::vector<Node> nodes(nodecount);
 
     std::random_device rand_dev;
-    std::mt19937 rng(rand_dev());
+    std::mt19937 rng(SEED);
     std::uniform_real_distribution<float> distribution(0.0, 1.0);
     float bounding = 0.9f;
     for (uint i = 0; i < nodecount; i++) {
@@ -220,6 +198,7 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
+    //Generate the vertex data for a circle, drawn with GL_TRIANGLE_FAN
     float data[(circle_points + 1) * 2];
     data[0] = 0.0;
     data[1] = 0.0;
@@ -244,32 +223,29 @@ int main(int argc, char *argv[]) {
         },
     };
 
+    //Load the vertex data into a buffer
     Ref<Buffer> vertex_buffer = Buffer::Create(sizeof(data), GL_STATIC_DRAW);
     vertex_buffer->subData(data, 0, sizeof(data));
     std::unordered_map<std::string, size_t> labels;
-    const uint nodecount = 3000;
-    Ref<Buffer> SSBO = createBufferedObjects(env, nodecount, labels);
-        glBindBufferRange(  GL_SHADER_STORAGE_BUFFER, 0, SSBO->getHandle(), 
-                            labels["nodes1"], labels["nodes1#END"] - labels["nodes1"]);
-        glBindBufferRange(  GL_SHADER_STORAGE_BUFFER, 1, SSBO->getHandle(), 
-                            labels["nodes2"], labels["nodes2#END"] - labels["nodes2"]);
-        glBindBufferRange(  GL_SHADER_STORAGE_BUFFER, 2, SSBO->getHandle(), 0, 
-                            labels["environment#END"] - labels["environment"]);
+    const uint nodecount = 1000;
 
+    //Generate the points with velocities, and load everything into a GPU buffer
+    Ref<Buffer> SSBO = createBufferedObjects(env, nodecount, labels);
+
+    //Bind the draw data to a VAO with the correct layout
     unsigned int VAO;
     glGenVertexArrays(1, &VAO);
 
     glBindVertexArray(VAO);
     vertex_buffer->bind(GL_ARRAY_BUFFER);
 
-    std::cout << labels["nodes1"] << std::endl;
-    
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), NULL);
     glEnableVertexAttribArray(0);
 
     Buffer::unbind(GL_ARRAY_BUFFER);
     glBindVertexArray(0);
 
+    //Make a VAO for the lines that are to be drawn
     unsigned int line_drawer;
     glGenVertexArrays(1, &line_drawer);
     glBindVertexArray(line_drawer);
@@ -280,22 +256,20 @@ int main(int argc, char *argv[]) {
     Buffer::unbind(GL_ARRAY_BUFFER);
     glBindVertexArray(0);
 
+    //Load shaders
     Ref<Shader> basic_shader = Shader::Create("src/physics_sphere.os");
     Ref<Shader> line_shader = Shader::Create("src/line_shader.os");
     Ref<Shader> compute_shader = Shader::Create("src/physics.os");
 
     glClearColor(0.7, 0.7, 0.7, 1.0); 
-    glm::mat4 model_matrix = glm::mat4(1);
-    model_matrix[0][0] = circle_radius;
-    model_matrix[1][1] = circle_radius;
     glm::vec3 color = glm::vec3(0.7, 0, 0);
     bool do_tick = false;
     int tpf = 1;
+    uint color_mode = 0;
 
     if (argc > 1) {
         printf("argv[1]: %s\n", argv[1]);
-        const char argv1[4] = {argv[1][0], argv[1][1], argv[1][2], argv[1][3]};
-        if (argv1 == "stop") return 0;
+        return 0;
     }
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -316,22 +290,27 @@ int main(int argc, char *argv[]) {
 
         if (ImGui::Button("Do tick")) do_tick = !do_tick;
         ImGui::InputInt("Times per frame", &tpf);
-        float scale = model_matrix[0][0];
-        if (ImGui::SliderFloat("Scale", &scale, 0.0, 1.0, "%.3f", ImGuiSliderFlags_Logarithmic)) {
-            model_matrix[0][0] = scale;
-            model_matrix[1][1] = scale;
-        }
 
-        ImGui::ColorEdit3("Sphere Color", glm::value_ptr(color));
+        ImGui::Text("Color Mode: "); ImGui::SameLine(); 
+        if (ImGui::Button("Weights")) color_mode = 0; ImGui::SameLine();
+        if (ImGui::Button("Speed")) color_mode = 1; ImGui::SameLine();
+        if (ImGui::Button("Circle color")) color_mode = 2;
+        
+        if (color_mode == 2)
+            ImGui::ColorEdit3("Circle color", glm::value_ptr(color));
+
         ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 
         ImGui::End();
         
+        //Do physics computation
         if (do_tick) {
             ZoneScopedN("All ticks");
             for (int i = 0; i < tpf; i++) {
                 ZoneScopedN("PhysicsTicks");
                 TracyGpuZone("PhysicsCompute");
+
+                glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
                 compute_shader->Bind();
                 compute_shader->SetUniform("TS", TS);
                 glBindBufferRange(  GL_SHADER_STORAGE_BUFFER, 0, SSBO->getHandle(), 
@@ -352,15 +331,17 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        //Draw spheres
         glBindVertexArray(VAO);
         basic_shader->Bind();
-        basic_shader->SetUniform("u_model_matrix", model_matrix);
         basic_shader->SetUniform("u_color", color);
+        basic_shader->SetUniform("u_color_mode", color_mode);
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
         glBindBufferRange(  GL_SHADER_STORAGE_BUFFER, 0, SSBO->getHandle(), 
                             labels["nodes1"], labels["nodes1#END"] - labels["nodes1"]);
         glDrawArraysInstanced(GL_TRIANGLE_FAN, 0, circle_points+1, nodecount);
 
+        //Draw lines
         glBindVertexArray(line_drawer);
         line_shader->Bind();
         glDrawArrays(GL_LINES, 0, 2 * env.lines);
@@ -373,11 +354,13 @@ int main(int argc, char *argv[]) {
         glfwSwapBuffers(window);
     }
 
+    //Cleanup
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 
     glDeleteVertexArrays(1, &VAO);
+    glDeleteVertexArrays(1, &line_drawer);
 
     glfwDestroyWindow(window);
     glfwTerminate();
